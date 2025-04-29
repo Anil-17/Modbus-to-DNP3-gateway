@@ -32,6 +32,51 @@
 using namespace std;
 using namespace opendnp3;
 
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <thread>
+
+// Setup serial
+int serial_port = open("/dev/ttyUSB0", O_RDONLY | O_NOCTTY);
+if (serial_port >= 0) {
+    termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tty.c_cflag &= ~PARENB;
+    tty.c_cflag &= ~CSTOPB;
+    tty.c_cflag &= ~CSIZE;
+    tty.c_cflag |= CS8;
+    tty.c_cflag &= ~CRTSCTS;
+    tty.c_cflag |= CREAD | CLOCAL;
+    tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+    tcsetattr(serial_port, TCSANOW, &tty);
+
+    std::thread serialThread([&]() {
+        char buffer[256];
+        while (true) {
+            memset(buffer, 0, sizeof(buffer));
+            int n = read(serial_port, buffer, sizeof(buffer));
+            if (n > 0) {
+                std::string input(buffer);
+                std::cout << "Serial: " << input << std::endl;
+
+                UpdateBuilder builder;
+                if (input.find("LED is ON") != std::string::npos) {
+                    builder.Update(BinaryInput(true), 3);
+                } else if (input.find("LED is OFF") != std::string::npos) {
+                    builder.Update(BinaryInput(false), 3);
+                }
+                outstation->Apply(builder.Build());
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    });
+    serialThread.detach(); // or join() if you handle cleanup later
+} else {
+    std::cerr << "Failed to open serial port" << std::endl;
+}
 auto app = DefaultOutstationApplication::Create(); // outstation/server application
 
 std::atomic<bool> stopFlag(false); 
